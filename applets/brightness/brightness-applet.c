@@ -761,6 +761,16 @@ gpm_applet_show_preferences (GtkWidget *widget, GpmBrightnessApplet *applet)
 	GSettings *settings;
 	gchar *current;
 
+	/* The fullscreen barrier behind the popup swallows every click while it is
+	 * mapped, including clicks on this dialog.  Tear the popup down first. */
+	if (applet->popup != NULL)
+		gtk_widget_hide (applet->popup);
+	if (applet->barrier != NULL)
+		gtk_widget_hide (applet->barrier);
+	applet->popped = FALSE;
+	gtk_widget_unset_state_flags (GTK_WIDGET (applet), GTK_STATE_FLAG_PRELIGHT);
+	gtk_widget_queue_draw (GTK_WIDGET (applet));
+
 	settings = g_settings_new ("org.mate.power-manager");
 	current = g_settings_get_string (settings, "brightness-backend");
 
