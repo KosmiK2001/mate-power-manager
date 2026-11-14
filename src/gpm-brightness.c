@@ -61,12 +61,13 @@
 #define GPM_DDC_OPEN_RETRIES	2
 /* how long to wait before writing the brightness again after the monitor
  * stopped answering (it may be showing another input or be asleep) */
-#define GPM_DDC_RETRY_SECONDS	5
+#define GPM_DDC_RETRY_SECONDS	3
 /* A monitor that was switched to another input ignores writes without telling
  * us (with verification off rc=0 only means the bytes went out), and some
  * panels reset their own brightness.  Re-read the value now and then and write
  * it again when it is not what the user asked for. */
 #define GPM_DDC_REASSERT_SECONDS	15
+#define GPM_DDC_REASSERT_MAX		300
 /* same for the gamma ramp: a Wayland output can vanish (monitor switched to
  * another input) and come back; keep pushing the last value until it sticks */
 #define GPM_GAMMA_RETRY_SECONDS	5
@@ -115,6 +116,7 @@ struct GpmBrightnessPrivate
 	gboolean		 ddc_stop;
 	gboolean		 ddc_has_work;
 	guint			 ddc_target;	/* percentage waiting to be written */
+	guint			 ddc_reassert;	/* current re-assert interval, grows on repeats */
 	gint64			 ddc_last_op;	/* monotonic time of the last bus operation */
 #endif
 	gboolean		 hw_changed;
@@ -340,6 +342,7 @@ gpm_brightness_start_ddc (GpmBrightness *brightness)
 {
 	g_debug ("No backlight property; using DDC/CI");
 	brightness->priv->use_ddc = TRUE;
+	brightness->priv->ddc_reassert = GPM_DDC_REASSERT_SECONDS;
 	/* A previous run may have left the screen dimmed through the gamma ramp;
 	 * DDC/CI drives the backlight, so hand the picture back at full range.
 	 * This matters on Wayland too: the wlr-gamma-control LUT survives until
@@ -818,7 +821,7 @@ gpm_brightness_ddc_worker (gpointer data)
 		gint64 deadline;
 
 		deadline = g_get_monotonic_time () +
-			   (gint64) GPM_DDC_REASSERT_SECONDS * G_USEC_PER_SEC;
+			   (gint64) brightness->priv->ddc_reassert * G_USEC_PER_SEC;
 
 		while (!brightness->priv->ddc_has_work && !brightness->priv->ddc_stop) {
 			if (!g_cond_wait_until (&brightness->priv->ddc_cond,
@@ -847,11 +850,19 @@ gpm_brightness_ddc_worker (gpointer data)
 			known = gpm_brightness_ddc_get (brightness, &current);
 			g_mutex_lock (&brightness->priv->ddc_lock);
 
-			if (known && current + 2 >= wanted && current <= wanted + 2)
+			if (known && current + 2 >= wanted && current <= wanted + 2) {
+				brightness->priv->ddc_reassert = GPM_DDC_REASSERT_SECONDS;
 				continue;
+			}
 
-			g_debug ("re-asserting brightness %u%% (monitor reports %d)",
-				 wanted, known ? (gint) current : -1);
+			/* Some panels answer the read with garbage no matter what we
+			 * write; do not hammer the bus because of that - back off
+			 * up to five minutes while the mismatch repeats. */
+			g_debug ("re-asserting brightness %u%% (monitor reports %d, next check in %u s)",
+				 wanted, known ? (gint) current : -1,
+				 MIN (brightness->priv->ddc_reassert * 2, GPM_DDC_REASSERT_MAX));
+			brightness->priv->ddc_reassert =
+				MIN (brightness->priv->ddc_reassert * 2, GPM_DDC_REASSERT_MAX);
 			brightness->priv->ddc_target = wanted;
 			brightness->priv->ddc_has_work = TRUE;
 		}
@@ -1341,6 +1352,8 @@ gpm_brightness_foreach_screen (GpmBrightness *brightness, GpmXRandROp op)
 			g_mutex_lock (&brightness->priv->ddc_lock);
 			brightness->priv->ddc_target = brightness->priv->shared_value;
 			brightness->priv->ddc_has_work = TRUE;
+			/* a fresh user request deserves a prompt check again */
+			brightness->priv->ddc_reassert = GPM_DDC_REASSERT_SECONDS;
 			g_cond_signal (&brightness->priv->ddc_cond);
 			g_mutex_unlock (&brightness->priv->ddc_lock);
 			ok = TRUE;
