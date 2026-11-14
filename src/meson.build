@@ -15,6 +15,8 @@ sources = files(
   'gpm-common.c',
   'gpm-brightness.h',
   'gpm-brightness.c',
+  'gpm-gamma-wayland.h',
+  'gpm-gamma-wayland.c',
   'gpm-upower.c',
   'gpm-upower.h'
 )
@@ -62,11 +64,25 @@ if enable_wayland
     command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']
   )
 
+  wlr_gamma_xml = files('wlr-gamma-control-unstable-v1.xml')
+  wlr_gamma_code = custom_target('wlr-gamma-protocol',
+    input: wlr_gamma_xml,
+    output: 'wlr-gamma-control-unstable-v1-protocol.c',
+    command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']
+  )
+  wlr_gamma_header = custom_target('wlr-gamma-header',
+    input: wlr_gamma_xml,
+    output: 'wlr-gamma-control-unstable-v1-client.h',
+    command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']
+  )
+
   wayland_protocol_sources = [
     ext_idle_notify_code,
     ext_idle_notify_header,
     wlr_output_power_code,
     wlr_output_power_header,
+    wlr_gamma_code,
+    wlr_gamma_header,
   ]
   sources += wayland_protocol_sources
 else

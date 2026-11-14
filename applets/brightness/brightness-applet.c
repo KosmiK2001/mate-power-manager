@@ -43,6 +43,10 @@
 #include "gpm-common.h"
 
 #ifdef HAVE_WAYLAND
+#include "gpm-gamma-wayland.h"
+#endif
+
+#ifdef HAVE_WAYLAND
 #include <gdk/gdkwayland.h>
 #include <gtk-layer-shell/gtk-layer-shell.h>
 #endif /* HAVE_WAYLAND */
@@ -638,12 +642,23 @@ gpm_applet_backend_available (const gchar *id, const gchar **reason)
 	gboolean have_plain = FALSE, have_ddcci = FALSE;
 
 	if (g_strcmp0 (id, "gamma") == 0) {
-		/* The ramp is an X11 feature; on a Wayland session there is
-		 * nothing to drive. */
-		if (gdk_display_get_default () == NULL ||
-		    !GDK_IS_X11_DISPLAY (gdk_display_get_default ())) {
+		/* X11 drives the CRTC ramp directly; on Wayland the same LUT goes
+		 * through zwlr_gamma_control_manager_v1 when the compositor exports
+		 * it (wlroots compositors do). */
+		if (gdk_display_get_default () == NULL) {
+			*reason = _("No display");
+			return FALSE;
+		}
+		if (!GDK_IS_X11_DISPLAY (gdk_display_get_default ())) {
+#ifdef HAVE_WAYLAND
+			if (!gpm_gamma_wayland_available ()) {
+				*reason = _("The compositor does not support gamma control");
+				return FALSE;
+			}
+#else
 			*reason = _("Requires an X11 session");
 			return FALSE;
+#endif
 		}
 		*reason = NULL;
 		return TRUE;

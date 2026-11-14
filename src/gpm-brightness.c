@@ -70,6 +70,10 @@
 #endif
 
 #include "gpm-brightness.h"
+
+#ifdef HAVE_WAYLAND
+#include "gpm-gamma-wayland.h"
+#endif
 #include "gpm-common.h"
 #include "gpm-marshal.h"
 
@@ -374,12 +378,20 @@ gpm_brightness_setup_display (GpmBrightness *brightness)
 		return FALSE;
 	}
 
-	/* gamma is an X11 feature: on Wayland there is no ramp to drive, so do not
-	 * leave the user with a red cross - use the hardware path instead. */
+	/* gamma used to be X11-only.  wlroots compositors (wayfire, sway) export
+	 * zwlr_gamma_control_manager_v1, so the same LUT can be pushed on Wayland;
+	 * only fall back to DDC/CI when the compositor does not offer it. */
 	if (g_strcmp0 (brightness->priv->backend, "gamma") == 0 &&
 	    (gdk_display_get_default () == NULL ||
 	     !GDK_IS_X11_DISPLAY (gdk_display_get_default ()))) {
-		g_debug ("gamma needs X11; using DDC/CI on this display server");
+#ifdef HAVE_WAYLAND
+		if (gpm_gamma_wayland_available ()) {
+			g_debug ("Backend forced: gamma (Wayland wlr-gamma-control)");
+			brightness->priv->use_gamma = TRUE;
+			return TRUE;
+		}
+#endif
+		g_debug ("gamma needs X11 or wlr-gamma-control; using DDC/CI");
 #ifdef HAVE_DDCUTIL
 		return gpm_brightness_start_ddc (brightness);
 #else
@@ -928,6 +940,15 @@ gpm_brightness_gamma_apply (GpmBrightness *brightness, gdouble level)
 	gint i;
 
 	g_return_val_if_fail (GPM_IS_BRIGHTNESS (brightness), FALSE);
+
+#ifdef HAVE_WAYLAND
+	/* Wayland: no X ramp, push the LUT through wlr-gamma-control instead. */
+	if (gdk_display_get_default () != NULL &&
+	    GDK_IS_WAYLAND_DISPLAY (gdk_display_get_default ())) {
+		level = CLAMP (level, GPM_GAMMA_MIN_LEVEL, 1.0);
+		return gpm_gamma_wayland_apply ((guint) (level * 100.0 + 0.5));
+	}
+#endif
 
 	/* The root window exists only after the X11 branch of init ran.  Callers
 	 * like gpm_brightness_start_ddc() reset the ramp early, and touching

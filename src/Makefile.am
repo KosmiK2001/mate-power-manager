@@ -9,11 +9,13 @@ EXTRA_DIST =						\
 	org.mate.PowerManager.KbdBacklight.xml		\
 	gpm-marshal.list				\
 	wlr-output-power-management-unstable-v1.xml	\
+	wlr-gamma-control-unstable-v1.xml		\
 	$(NULL)
 
 WAYLAND_PROTOCOLS_DATADIR = @WAYLAND_PROTOCOLS_DATADIR@
 EXT_IDLE_NOTIFY_XML = $(WAYLAND_PROTOCOLS_DATADIR)/staging/ext-idle-notify/ext-idle-notify-v1.xml
 WLR_OUTPUT_POWER_XML = $(srcdir)/wlr-output-power-management-unstable-v1.xml
+WLR_GAMMA_XML = $(srcdir)/wlr-gamma-control-unstable-v1.xml
 
 AM_CPPFLAGS =						\
 	$(GLIB_CFLAGS)					\
@@ -90,12 +92,15 @@ libgpmshared_a_SOURCES =				\
 	gpm-marshal.h					\
 	gpm-marshal.c					\
 	gpm-upower.c					\
-	gpm-upower.h
+	gpm-upower.h					\
+	gpm-gamma-wayland.c				\
+	gpm-gamma-wayland.h
 
 if HAVE_WAYLAND
 nodist_libgpmshared_a_SOURCES =				\
 	ext-idle-notify-v1-protocol.c			\
 	wlr-output-power-management-unstable-v1-protocol.c	\
+	wlr-gamma-control-unstable-v1-protocol.c		\
 	$(NULL)
 endif
 
@@ -329,6 +334,8 @@ BUILT_SOURCES +=					\
 	ext-idle-notify-v1-protocol.c			\
 	wlr-output-power-management-unstable-v1-client.h	\
 	wlr-output-power-management-unstable-v1-protocol.c	\
+	wlr-gamma-control-unstable-v1-client.h		\
+	wlr-gamma-control-unstable-v1-protocol.c		\
 	$(NULL)
 endif
 
@@ -342,6 +349,12 @@ wlr-output-power-management-unstable-v1-client.h: $(WLR_OUTPUT_POWER_XML)
 	$(AM_V_GEN)$(WAYLAND_SCANNER) client-header < $< > $@
 
 wlr-output-power-management-unstable-v1-protocol.c: $(WLR_OUTPUT_POWER_XML)
+	$(AM_V_GEN)$(WAYLAND_SCANNER) private-code < $< > $@
+
+wlr-gamma-control-unstable-v1-client.h: $(WLR_GAMMA_XML)
+	$(AM_V_GEN)$(WAYLAND_SCANNER) client-header < $< > $@
+
+wlr-gamma-control-unstable-v1-protocol.c: $(WLR_GAMMA_XML)
 	$(AM_V_GEN)$(WAYLAND_SCANNER) private-code < $< > $@
 
 gpm-marshal.c: gpm-marshal.list

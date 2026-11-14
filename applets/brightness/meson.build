@@ -2,8 +2,25 @@ po_dir = join_paths(meson.source_root(), 'po')
 
 source_files = files(
   'gpm-common.c',
-  'brightness-applet.c'
+  'brightness-applet.c',
 )
+
+if enable_wayland
+  applet_gamma_xml = files('../src/wlr-gamma-control-unstable-v1.xml')
+  applet_gamma_code = custom_target('applet-wlr-gamma-protocol',
+    input: applet_gamma_xml,
+    output: 'wlr-gamma-control-unstable-v1-protocol.c',
+    command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@']
+  )
+  applet_gamma_header = custom_target('applet-wlr-gamma-header',
+    input: applet_gamma_xml,
+    output: 'wlr-gamma-control-unstable-v1-client.h',
+    command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@']
+  )
+  source_files += [files('../src/gpm-gamma-wayland.c'),
+                   applet_gamma_code,
+                   applet_gamma_header]
+endif
 
 cflags = [
   '-DMATELOCALEDIR="@0@"'.format(matelocaledir),
@@ -27,6 +44,8 @@ applet_deps = [
 
 if enable_wayland
   applet_deps += gtk_layer_shell
+  applet_deps += wayland_client
+  applet_deps += dependency('wayland-client')
 endif
 
 if enable_applets_inprocess
