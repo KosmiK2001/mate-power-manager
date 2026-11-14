@@ -2027,6 +2027,55 @@ gpm_brightness_class_init (GpmBrightnessClass *klass)
  **/
 /* The preference changed in the applet: re-evaluate which backend to use
  * without restarting the daemon. */
+#ifdef HAVE_X11
+/* Wire the RandR side: the screen-resource cache, the root window, the event
+ * filter and XRRSelectInput.  Needed at start-up AND whenever the backend
+ * switches to gamma at runtime.  A daemon that started with the ddc or kernel
+ * backend never opens the X display at all - setup_display() returns before
+ * priv->dpy is set - so switching to gamma later left root_window NULL and
+ * every ramp write silently returned FALSE. */
+static void
+gpm_brightness_setup_x11 (GpmBrightness *brightness)
+{
+	GdkScreen *screen;
+	GdkDisplay *display;
+	int event_base;
+	int ignore;
+
+	if (brightness->priv->dpy == NULL || brightness->priv->root_window != NULL)
+		return;
+
+	brightness->priv->resources = g_ptr_array_new_with_free_func ((GDestroyNotify) XRRFreeScreenResources);
+
+	screen = gdk_screen_get_default ();
+	brightness->priv->root_window = gdk_screen_get_root_window (screen);
+	display = gdk_display_get_default ();
+
+	/* as we a filtering by a window, we have to add an event type */
+	if (!XRRQueryExtension (GDK_DISPLAY_XDISPLAY (gdk_display_get_default()), &event_base, &ignore)) {
+		g_warning ("can't get event_base for XRR");
+		event_base = 0;
+	}
+	brightness->priv->rr_event_base = event_base;
+	gdk_x11_register_standard_event_type (display, event_base, RRNotify + 1);
+	gdk_window_add_filter (brightness->priv->root_window,
+			       gpm_brightness_filter_xevents, brightness);
+
+	/* don't abort on error */
+	gdk_x11_display_error_trap_push (display);
+	XRRSelectInput (GDK_DISPLAY_XDISPLAY (gdk_display_get_default()),
+			GDK_WINDOW_XID (brightness->priv->root_window),
+			RRScreenChangeNotifyMask |
+			RROutputPropertyNotifyMask);
+	gdk_display_flush (display);
+	if (gdk_x11_display_error_trap_pop (display))
+		g_warning ("failed to select XRRSelectInput");
+
+	/* create cache of XRRScreenResources as XRRGetScreenResources() is slow */
+	gpm_brightness_update_cache (brightness);
+}
+#endif
+
 static void
 gpm_brightness_backend_changed (GSettings *settings, const gchar *key,
 				GpmBrightness *brightness)
@@ -2057,6 +2106,12 @@ gpm_brightness_backend_changed (GSettings *settings, const gchar *key,
 	brightness->priv->use_gamma = FALSE;
 	brightness->priv->use_ddc = FALSE;
 	brightness->priv->has_extension = gpm_brightness_setup_display (brightness);
+#ifdef HAVE_X11
+	/* Coming from ddc/kernel the X display was never opened: wire it now,
+	 * otherwise the ramp write has no root window. */
+	if (brightness->priv->use_gamma)
+		gpm_brightness_setup_x11 (brightness);
+#endif
 
 	/* Then start the new backend from a known state. */
 	brightness->priv->cache_trusted = FALSE;
@@ -2123,39 +2178,7 @@ gpm_brightness_init (GpmBrightness *brightness)
 		if (brightness->priv->dpy == NULL)
 			return;
 
-		GdkScreen *screen;
-		GdkDisplay *display;
-		int event_base;
-		int ignore;
-
-		brightness->priv->resources = g_ptr_array_new_with_free_func ((GDestroyNotify) XRRFreeScreenResources);
-
-		screen = gdk_screen_get_default ();
-		brightness->priv->root_window = gdk_screen_get_root_window (screen);
-		display = gdk_display_get_default ();
-
-		/* as we a filtering by a window, we have to add an event type */
-		if (!XRRQueryExtension (GDK_DISPLAY_XDISPLAY (gdk_display_get_default()), &event_base, &ignore)) {
-			g_warning ("can't get event_base for XRR");
-			event_base = 0;
-		}
-		brightness->priv->rr_event_base = event_base;
-		gdk_x11_register_standard_event_type (display, event_base, RRNotify + 1);
-		gdk_window_add_filter (brightness->priv->root_window,
-				       gpm_brightness_filter_xevents, brightness);
-
-		/* don't abort on error */
-		gdk_x11_display_error_trap_push (display);
-		XRRSelectInput (GDK_DISPLAY_XDISPLAY (gdk_display_get_default()),
-				GDK_WINDOW_XID (brightness->priv->root_window),
-				RRScreenChangeNotifyMask |
-				RROutputPropertyNotifyMask); /* <--- the only one we need, but see rh:345551 */
-		gdk_display_flush (display);
-		if (gdk_x11_display_error_trap_pop (display))
-			g_warning ("failed to select XRRSelectInput");
-
-		/* create cache of XRRScreenResources as XRRGetScreenResources() is slow */
-		gpm_brightness_update_cache (brightness);
+		gpm_brightness_setup_x11 (brightness);
 		return;
 	}
 #endif
