@@ -62,6 +62,11 @@
 /* how long to wait before writing the brightness again after the monitor
  * stopped answering (it may be showing another input or be asleep) */
 #define GPM_DDC_RETRY_SECONDS	5
+/* A monitor that was switched to another input ignores writes without telling
+ * us (with verification off rc=0 only means the bytes went out), and some
+ * panels reset their own brightness.  Re-read the value now and then and write
+ * it again when it is not what the user asked for. */
+#define GPM_DDC_REASSERT_SECONDS	15
 /* same for the gamma ramp: a Wayland output can vanish (monitor switched to
  * another input) and come back; keep pushing the last value until it sticks */
 #define GPM_GAMMA_RETRY_SECONDS	5
@@ -810,13 +815,46 @@ gpm_brightness_ddc_worker (gpointer data)
 		guint target;
 		gboolean ok;
 		gboolean retry = FALSE;
+		gint64 deadline;
 
-		while (!brightness->priv->ddc_has_work && !brightness->priv->ddc_stop)
-			g_cond_wait (&brightness->priv->ddc_cond,
-				     &brightness->priv->ddc_lock);
+		deadline = g_get_monotonic_time () +
+			   (gint64) GPM_DDC_REASSERT_SECONDS * G_USEC_PER_SEC;
+
+		while (!brightness->priv->ddc_has_work && !brightness->priv->ddc_stop) {
+			if (!g_cond_wait_until (&brightness->priv->ddc_cond,
+						&brightness->priv->ddc_lock,
+						deadline))
+				break;	/* nothing new: time to check the monitor */
+		}
 
 		if (brightness->priv->ddc_stop)
 			break;
+
+		if (!brightness->priv->ddc_has_work) {
+			guint current = 0;
+			guint wanted;
+			gboolean known;
+
+			/* Nothing was asked for; only a value we set earlier is
+			 * worth defending. */
+			if (!brightness->priv->cache_trusted)
+				continue;
+
+			wanted = brightness->priv->cache_percentage;
+
+			/* The read talks to the bus: never hold the lock for it. */
+			g_mutex_unlock (&brightness->priv->ddc_lock);
+			known = gpm_brightness_ddc_get (brightness, &current);
+			g_mutex_lock (&brightness->priv->ddc_lock);
+
+			if (known && current + 2 >= wanted && current <= wanted + 2)
+				continue;
+
+			g_debug ("re-asserting brightness %u%% (monitor reports %d)",
+				 wanted, known ? (gint) current : -1);
+			brightness->priv->ddc_target = wanted;
+			brightness->priv->ddc_has_work = TRUE;
+		}
 
 		brightness->priv->ddc_has_work = FALSE;
 		target = brightness->priv->ddc_target;
