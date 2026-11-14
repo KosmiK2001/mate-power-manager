@@ -75,6 +75,7 @@ typedef struct{
 	gint size;
 	/* the slider action delaying */
 	guint slider_delay_id;
+	gboolean slider_dragging;	/* the user is holding the slider */
 } GpmBrightnessApplet;
 
 typedef struct{
@@ -429,7 +430,12 @@ gpm_applet_update_popup_level (GpmBrightnessApplet *applet)
 	if (applet->popup != NULL) {
 		gtk_widget_set_sensitive (applet->btn_plus, applet->level < 100);
 		gtk_widget_set_sensitive (applet->btn_minus, applet->level > 0);
-		gtk_range_set_value (GTK_RANGE(applet->slider), (guint) applet->level);
+		/* Never move the handle while it is held: the daemon reports the
+		 * value back after every write, and with the gamma backend that
+		 * answer arrives fast enough to fight the user's drag - the
+		 * slider visibly jitters under the pointer. */
+		if (!applet->slider_dragging)
+			gtk_range_set_value (GTK_RANGE(applet->slider), (guint) applet->level);
 	}
 	gpm_applet_update_tooltip (applet);
 }
@@ -508,6 +514,23 @@ gpm_applet_slide_delayed_cb (gpointer data)
  *
  * callback for the slider
  **/
+/* GTK3 has no "is being dragged" query for a range, so track the button. */
+static gboolean
+gpm_applet_slider_press_cb (GtkWidget *w, GdkEventButton *event, GpmBrightnessApplet *applet)
+{
+	applet->slider_dragging = TRUE;
+	return FALSE;	/* let the range handle the click itself */
+}
+
+static gboolean
+gpm_applet_slider_release_cb (GtkWidget *w, GdkEventButton *event, GpmBrightnessApplet *applet)
+{
+	applet->slider_dragging = FALSE;
+	/* catch up with whatever the hardware ended up at */
+	gpm_applet_update_popup_level (applet);
+	return FALSE;
+}
+
 static gboolean
 gpm_applet_slide_cb (GtkWidget *w, GpmBrightnessApplet *applet)
 {
@@ -940,6 +963,10 @@ gpm_applet_create_popup (GpmBrightnessApplet *applet)
 	gtk_scale_set_draw_value (GTK_SCALE(applet->slider), FALSE);
 	gtk_range_set_value (GTK_RANGE(applet->slider), applet->level);
 	g_signal_connect (G_OBJECT(applet->slider), "value-changed", G_CALLBACK(gpm_applet_slide_cb), applet);
+	g_signal_connect (G_OBJECT(applet->slider), "button-press-event",
+			  G_CALLBACK(gpm_applet_slider_press_cb), applet);
+	g_signal_connect (G_OBJECT(applet->slider), "button-release-event",
+			  G_CALLBACK(gpm_applet_slider_release_cb), applet);
 
 	/* minus button */
 	applet->btn_minus = gtk_button_new_with_label ("\342\210\222"); /* U+2212 MINUS SIGN */
