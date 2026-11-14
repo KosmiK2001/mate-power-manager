@@ -774,10 +774,22 @@ gpm_applet_show_preferences (GtkWidget *widget, GpmBrightnessApplet *applet)
 	settings = g_settings_new ("org.mate.power-manager");
 	current = g_settings_get_string (settings, "brightness-backend");
 
+	/* Not modal: a modal grab blocks the panel's own menu while the dialog is
+	 * up, which reads as "the desktop froze".  Transient to the panel toplevel
+	 * so the compositor keeps it above the panel and places it itself. */
 	dialog = gtk_dialog_new_with_buttons (_("Brightness settings"), NULL,
-					      GTK_DIALOG_MODAL,
+					      0,
 					      _("Close"), GTK_RESPONSE_CLOSE,
 					      NULL);
+	gtk_window_set_type_hint (GTK_WINDOW (dialog), GDK_WINDOW_TYPE_HINT_UTILITY);
+	{
+		GtkWidget *toplevel = gtk_widget_get_toplevel (GTK_WIDGET (applet));
+
+		if (GTK_IS_WINDOW (toplevel))
+			gtk_window_set_transient_for (GTK_WINDOW (dialog),
+						      GTK_WINDOW (toplevel));
+	}
+	gtk_window_set_position (GTK_WINDOW (dialog), GTK_WIN_POS_CENTER);
 	gtk_window_set_default_size (GTK_WINDOW (dialog), 440, -1);
 	gtk_window_set_resizable (GTK_WINDOW (dialog), FALSE);
 
