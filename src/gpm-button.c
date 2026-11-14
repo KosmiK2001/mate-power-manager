@@ -311,7 +311,9 @@ gpm_button_is_lid_closed (GpmButton *button)
 			g_variant_unref (res);
 			return lid;
 		} else if (error != NULL ) {
-			g_error ("Error in dbus - %s", error->message);
+			/* A failed property read must not take the whole daemon down:
+			 * UPower may be restarting, or the caller may sit outside the seat. */
+			g_warning ("Error in dbus - %s", error->message);
 			g_error_free (error);
 		}
 		g_object_unref(proxy);

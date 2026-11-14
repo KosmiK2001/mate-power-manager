@@ -185,7 +185,7 @@ gpm_brightness_helper_get_value (const gchar *argument)
 	ret = g_spawn_command_line_sync (command,
 					 &stdout_data, NULL, &exit_status, &error);
 	if (!ret) {
-		g_error ("failed to get value: %s", error->message);
+		g_warning ("failed to get value: %s", error->message);
 		g_error_free (error);
 		goto out;
 	}
@@ -216,7 +216,7 @@ gpm_brightness_helper_set_value (const gchar *argument, gint value)
 	command = g_strdup_printf ("pkexec " LIBEXECDIR "/mate-power-backlight-helper --%s %i", argument, value);
 	ret = g_spawn_command_line_sync (command, NULL, NULL, &exit_status, &error);
 	if (!ret) {
-		g_error ("failed to get value: %s", error->message);
+		g_warning ("failed to set value: %s", error->message);
 		g_error_free (error);
 		goto out;
 	}
