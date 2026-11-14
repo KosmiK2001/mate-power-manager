@@ -121,6 +121,7 @@ struct GpmBrightnessPrivate
 #endif
 	gboolean		 hw_changed;
 	gint			 extension_levels;
+	gint			 rr_event_base;	/* RandR event base, 0 until init wired it */
 	guint			 retry_id;	/* pending re-apply after the output came back */
 	guint			 retry_percentage;
 	gint			 extension_current;
@@ -1502,8 +1503,20 @@ static GdkFilterReturn
 gpm_brightness_filter_xevents (GdkXEvent *xevent, GdkEvent *event, gpointer data)
 {
 	GpmBrightness *brightness = GPM_BRIGHTNESS (data);
-	if (event->type == GDK_NOTHING)
+	XEvent *xev = (XEvent *) xevent;
+
+	/* A GDK filter sees EVERY X event this client receives, and reading the
+	 * ramp costs a round trip per CRTC (~30 ms measured).  Reacting to all
+	 * of them buried the main loop under a compiz session: SetBrightness
+	 * queued behind thousands of pointless reads and the slider lagged by
+	 * 6-10 s.  Only the RandR events we selected are interesting. */
+	if (xev == NULL || brightness->priv->rr_event_base == 0)
 		return GDK_FILTER_CONTINUE;
+
+	if (xev->type != brightness->priv->rr_event_base + RRNotify &&
+	    xev->type != brightness->priv->rr_event_base + RRScreenChangeNotify)
+		return GDK_FILTER_CONTINUE;
+
 	gpm_brightness_may_have_changed (brightness);
 	return GDK_FILTER_CONTINUE;
 }
@@ -2069,7 +2082,9 @@ gpm_brightness_init (GpmBrightness *brightness)
 		/* as we a filtering by a window, we have to add an event type */
 		if (!XRRQueryExtension (GDK_DISPLAY_XDISPLAY (gdk_display_get_default()), &event_base, &ignore)) {
 			g_warning ("can't get event_base for XRR");
+			event_base = 0;
 		}
+		brightness->priv->rr_event_base = event_base;
 		gdk_x11_register_standard_event_type (display, event_base, RRNotify + 1);
 		gdk_window_add_filter (brightness->priv->root_window,
 				       gpm_brightness_filter_xevents, brightness);
