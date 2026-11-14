@@ -70,6 +70,7 @@ typedef struct{
 	DBusGConnection *connection;
 	guint bus_watch_id;	/* GDBus name watcher */
 	guint poll_id;		/* presence polling fallback */
+	gboolean poll_busy;	/* an activation probe is in flight */
 	guint level;
 	/* a cache for panel size */
 	gint size;
@@ -1419,35 +1420,23 @@ gpm_brightness_applet_dbus_disconnect (GpmBrightnessApplet *applet)
  *
  * The name watcher is event driven and should be enough, but it can miss the
  * transition when the daemon is started by D-Bus activation right after the
- * applet: the applet then keeps drawing the "disabled" icon for the whole
- * session.  Poll the bus every couple of seconds as a fallback.  Only
- * NameHasOwner is asked - no brightness/DDC traffic at all - so this costs one
- * tiny round trip per tick and nothing when the state has not changed.
+ * applet.  Poll every couple of seconds as a fallback, and use a real call so
+ * the poll also ACTIVATES the service - see the comment inside.
  **/
-static gboolean
-gpm_brightness_applet_poll_cb (GpmBrightnessApplet *applet)
+static void
+gpm_brightness_applet_poll_done_cb (GObject *source_object, GAsyncResult *res,
+				    gpointer data)
 {
-	GDBusConnection *bus;
+	GpmBrightnessApplet *applet = data;
 	GVariant *reply;
-	gboolean has_owner = FALSE;
+	gboolean has_owner;
 
-	bus = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, NULL);
-	if (bus == NULL)
-		return TRUE;
+	applet->poll_busy = FALSE;
 
-	reply = g_dbus_connection_call_sync (bus,
-					     "org.freedesktop.DBus",
-					     "/org/freedesktop/DBus",
-					     "org.freedesktop.DBus",
-					     "NameHasOwner",
-					     g_variant_new ("(s)", GPM_DBUS_SERVICE),
-					     G_VARIANT_TYPE ("(b)"),
-					     G_DBUS_CALL_FLAGS_NONE, 500, NULL, NULL);
-	if (reply != NULL) {
-		g_variant_get (reply, "(b)", &has_owner);
+	reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source_object), res, NULL);
+	has_owner = (reply != NULL);
+	if (reply != NULL)
 		g_variant_unref (reply);
-	}
-	g_object_unref (bus);
 
 	if (has_owner && applet->proxy == NULL) {
 		gpm_brightness_applet_dbus_connect (applet);
@@ -1458,6 +1447,42 @@ gpm_brightness_applet_poll_cb (GpmBrightnessApplet *applet)
 		gpm_applet_update_tooltip (applet);
 		gpm_applet_draw_cb (applet);
 	}
+}
+
+static gboolean
+gpm_brightness_applet_poll_cb (GpmBrightnessApplet *applet)
+{
+	GDBusConnection *bus;
+
+	if (applet->poll_busy)
+		return TRUE;
+
+	bus = g_bus_get_sync (G_BUS_TYPE_SESSION, NULL, NULL);
+	if (bus == NULL)
+		return TRUE;
+
+	applet->poll_busy = TRUE;
+
+	/* A REAL call to the service, not NameHasOwner: the session bus activates
+	 * org.mate.PowerManager on the first call, and that is the only thing that
+	 * starts the daemon in a session running no XDG autostart - the Wayland
+	 * session has no mate-session, so nothing else ever brings it up and the
+	 * applet sat there with the red "no daemon" icon.  Asynchronous on
+	 * purpose: activation waits for the service to appear, and that takes
+	 * seconds while libddcutil scans its buses. */
+	g_dbus_connection_call (bus,
+				GPM_DBUS_SERVICE,
+				GPM_DBUS_PATH_BACKLIGHT,
+				GPM_DBUS_INTERFACE_BACKLIGHT,
+				"GetBrightness",
+				NULL,
+				G_VARIANT_TYPE ("(u)"),
+				G_DBUS_CALL_FLAGS_NONE,
+				20000,
+				NULL,
+				gpm_brightness_applet_poll_done_cb,
+				applet);
+	g_object_unref (bus);
 
 	return TRUE;
 }
