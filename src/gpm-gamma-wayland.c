@@ -239,10 +239,14 @@ gamma_ensure (void)
 gboolean
 gpm_gamma_wayland_available (void)
 {
-	GdkDisplay *display;
+	/* Judge by the SESSION, not by GDK's backend.  Under Xwayland the applet
+	 * and the daemon are X11 clients - GDK_IS_X11_DISPLAY is TRUE - while
+	 * the picture is produced by the Wayland compositor, so an X ramp would
+	 * be written into Xwayland and never reach the output.  The wl_display
+	 * we open here is our own connection to the real compositor. */
+	const gchar *session = g_getenv ("XDG_SESSION_TYPE");
 
-	display = gdk_display_get_default ();
-	if (display == NULL || !GDK_IS_WAYLAND_DISPLAY (display))
+	if (g_strcmp0 (session, "wayland") != 0 && g_getenv ("WAYLAND_DISPLAY") == NULL)
 		return FALSE;
 
 	return gamma_ensure ();

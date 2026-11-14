@@ -361,6 +361,18 @@ gpm_brightness_start_ddc (GpmBrightness *brightness)
 }
 #endif
 
+/* TRUE when the session is Wayland even if this process talks X11 (Xwayland).
+ * XDG_SESSION_TYPE is what the session sets; WAYLAND_DISPLAY is inherited by
+ * Xwayland clients, so either one identifies it. */
+static gboolean
+gpm_brightness_wayland_session (void)
+{
+	const gchar *type = g_getenv ("XDG_SESSION_TYPE");
+
+	return g_strcmp0 (type, "wayland") == 0 ||
+	       g_getenv ("WAYLAND_DISPLAY") != NULL;
+}
+
 /**
  * gpm_brightness_setup_display:
  **/
@@ -399,8 +411,7 @@ gpm_brightness_setup_display (GpmBrightness *brightness)
 	 * zwlr_gamma_control_manager_v1, so the same LUT can be pushed on Wayland;
 	 * only fall back to DDC/CI when the compositor does not offer it. */
 	if (g_strcmp0 (brightness->priv->backend, "gamma") == 0 &&
-	    (gdk_display_get_default () == NULL ||
-	     !GDK_IS_X11_DISPLAY (gdk_display_get_default ()))) {
+	    gpm_brightness_wayland_session ()) {
 #ifdef HAVE_WAYLAND
 		if (gpm_gamma_wayland_available ()) {
 			g_debug ("Backend forced: gamma (Wayland wlr-gamma-control)");
@@ -1020,9 +1031,11 @@ gpm_brightness_gamma_apply (GpmBrightness *brightness, gdouble level)
 	g_return_val_if_fail (GPM_IS_BRIGHTNESS (brightness), FALSE);
 
 #ifdef HAVE_WAYLAND
-	/* Wayland: no X ramp, push the LUT through wlr-gamma-control instead. */
-	if (gdk_display_get_default () != NULL &&
-	    GDK_IS_WAYLAND_DISPLAY (gdk_display_get_default ())) {
+	/* Wayland session: no X ramp, push the LUT through wlr-gamma-control.
+	 * This must key off the session, not the GDK backend: an applet running
+	 * through Xwayland is an X11 client and XRRSetCrtcGamma would only
+	 * touch Xwayland's own output. */
+	if (gpm_brightness_wayland_session ()) {
 		level = CLAMP (level, GPM_GAMMA_MIN_LEVEL, 1.0);
 		return gpm_gamma_wayland_apply ((guint) (level * 100.0 + 0.5));
 	}
