@@ -32,13 +32,13 @@
  * long as the dimming must last.
  */
 
-#include "config.h"
-
-#ifdef HAVE_WAYLAND
-
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+
+#include "config.h"
+
+#ifdef HAVE_WAYLAND
 
 #include <errno.h>
 #include <fcntl.h>
