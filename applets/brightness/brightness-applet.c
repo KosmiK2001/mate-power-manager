@@ -1454,6 +1454,13 @@ gpm_brightness_applet_poll_cb (GpmBrightnessApplet *applet)
 {
 	GDBusConnection *bus;
 
+	/* Nothing to do while the daemon is connected: the name watcher reports
+	 * its disappearance and clears the proxy.  Polling with a real call every
+	 * tick would otherwise cost a full ramp read in the daemon every 2 s on
+	 * X11 (measured ~30 ms), for nothing. */
+	if (applet->proxy != NULL)
+		return TRUE;
+
 	if (applet->poll_busy)
 		return TRUE;
 
