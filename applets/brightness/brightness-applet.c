@@ -71,6 +71,7 @@ typedef struct{
 	guint bus_watch_id;	/* GDBus name watcher */
 	guint poll_id;		/* presence polling fallback */
 	gboolean poll_busy;	/* an activation probe is in flight */
+	gint64 last_activation;	/* monotonic time of the last activation attempt */
 	guint level;
 	/* a cache for panel size */
 	gint size;
@@ -1459,6 +1460,8 @@ static gboolean
 gpm_brightness_applet_poll_cb (GpmBrightnessApplet *applet)
 {
 	GDBusConnection *bus;
+	GVariant *reply;
+	gboolean has_owner = FALSE;
 
 	/* Nothing to do while the daemon is connected: the name watcher reports
 	 * its disappearance and clears the proxy.  Polling with a real call every
@@ -1474,6 +1477,37 @@ gpm_brightness_applet_poll_cb (GpmBrightnessApplet *applet)
 	if (bus == NULL)
 		return TRUE;
 
+	/* Cheap question first: does anybody own the name? */
+	reply = g_dbus_connection_call_sync (bus,
+					     "org.freedesktop.DBus",
+					     "/org/freedesktop/DBus",
+					     "org.freedesktop.DBus",
+					     "NameHasOwner",
+					     g_variant_new ("(s)", GPM_DBUS_SERVICE),
+					     G_VARIANT_TYPE ("(b)"),
+					     G_DBUS_CALL_FLAGS_NONE, 500, NULL, NULL);
+	if (reply != NULL) {
+		g_variant_get (reply, "(b)", &has_owner);
+		g_variant_unref (reply);
+	}
+
+	if (has_owner) {
+		g_object_unref (bus);
+		gpm_brightness_applet_dbus_connect (applet);
+		gpm_applet_update_tooltip (applet);
+		gpm_applet_draw_cb (applet);
+		return TRUE;
+	}
+
+	/* Nobody owns it.  Activate through a real call, but not on every tick:
+	 * when the daemon cannot start at all (no DISPLAY in the bus environment,
+	 * for one) this would spawn a dying process every two seconds. */
+	if (g_get_monotonic_time () - applet->last_activation <
+	    30 * G_USEC_PER_SEC) {
+		g_object_unref (bus);
+		return TRUE;
+	}
+	applet->last_activation = g_get_monotonic_time ();
 	applet->poll_busy = TRUE;
 
 	/* A REAL call to the service, not NameHasOwner: the session bus activates
