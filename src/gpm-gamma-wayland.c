@@ -18,6 +18,10 @@
 
 #ifdef HAVE_WAYLAND
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
@@ -41,7 +45,7 @@ static struct wl_surface *wl_surface = NULL;
 static struct zwlr_gamma_control_manager_v1 *gamma_manager = NULL;
 static struct zwlr_gamma_control_v1 *gamma_control = NULL;
 
-static gboolean
+static void
 gamma_control_failed_cb (void *data, struct zwlr_gamma_control_v1 *control)
 {
 	g_debug ("Wayland gamma control failed for this output; giving up on it");
@@ -49,7 +53,6 @@ gamma_control_failed_cb (void *data, struct zwlr_gamma_control_v1 *control)
 		zwlr_gamma_control_v1_destroy (gamma_control);
 		gamma_control = NULL;
 	}
-	return 0;
 }
 
 static const struct zwlr_gamma_control_v1_listener gamma_control_listener = {
