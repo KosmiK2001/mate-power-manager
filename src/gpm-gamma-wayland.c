@@ -44,6 +44,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>	/* memfd_create() */
 
 #include <glib.h>
 #include <gdk/gdkwayland.h>
