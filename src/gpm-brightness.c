@@ -336,13 +336,13 @@ gpm_brightness_start_ddc (GpmBrightness *brightness)
 	g_debug ("No backlight property; using DDC/CI");
 	brightness->priv->use_ddc = TRUE;
 	/* A previous run may have left the screen dimmed through the gamma ramp;
-	 * DDC/CI drives the backlight, so hand the picture back at full range. */
-	brightness->priv->use_gamma = FALSE;
-	/* The ramp only exists on X11; on Wayland there is no display to talk to
-	 * and touching it crashed the daemon. */
-	if (gdk_display_get_default () != NULL &&
-	    GDK_IS_X11_DISPLAY (gdk_display_get_default ()))
+	 * DDC/CI drives the backlight, so hand the picture back at full range.
+	 * This matters on Wayland too: the wlr-gamma-control LUT survives until
+	 * it is explicitly reset, and leaving it applied would stack software
+	 * dimming on top of the hardware backlight. */
+	if (gdk_display_get_default () != NULL)
 		gpm_brightness_gamma_apply (brightness, 1.0);
+	brightness->priv->use_gamma = FALSE;
 
 	g_mutex_init (&brightness->priv->ddc_lock);
 	g_cond_init (&brightness->priv->ddc_cond);
