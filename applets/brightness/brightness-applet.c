@@ -43,10 +43,6 @@
 #include "gpm-common.h"
 
 #ifdef HAVE_WAYLAND
-#include "gpm-gamma-wayland.h"
-#endif
-
-#ifdef HAVE_WAYLAND
 #include <gdk/gdkwayland.h>
 #include <gtk-layer-shell/gtk-layer-shell.h>
 #endif /* HAVE_WAYLAND */
@@ -642,24 +638,12 @@ gpm_applet_backend_available (const gchar *id, const gchar **reason)
 	gboolean have_plain = FALSE, have_ddcci = FALSE;
 
 	if (g_strcmp0 (id, "gamma") == 0) {
-		/* X11 drives the CRTC ramp directly; on Wayland the same LUT goes
-		 * through zwlr_gamma_control_manager_v1 when the compositor exports
-		 * it (wlroots compositors do). */
-		if (gdk_display_get_default () == NULL) {
-			*reason = _("No display");
-			return FALSE;
-		}
-		if (!GDK_IS_X11_DISPLAY (gdk_display_get_default ())) {
-#ifdef HAVE_WAYLAND
-			if (!gpm_gamma_wayland_available ()) {
-				*reason = _("The compositor does not support gamma control");
-				return FALSE;
-			}
-#else
-			*reason = _("Requires an X11 session");
-			return FALSE;
-#endif
-		}
+		/* Both backends are reachable from the applet: X11 drives the CRTC
+		 * ramp, Wayland goes through wlr-gamma-control.  Do NOT probe the
+		 * protocol here - a wl_display_roundtrip() from a panel callback
+		 * corrupts GDK's event queue and aborts the panel.  The daemon
+		 * decides at apply time and falls back to DDC/CI when the
+		 * compositor has no gamma control. */
 		*reason = NULL;
 		return TRUE;
 	}
