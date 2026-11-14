@@ -59,6 +59,12 @@
 #define GPM_DDC_BRIGHTNESS_CODE	0x10
 #define GPM_DDC_RETRIES		3
 #define GPM_DDC_OPEN_RETRIES	2
+/* how long to wait before writing the brightness again after the monitor
+ * stopped answering (it may be showing another input or be asleep) */
+#define GPM_DDC_RETRY_SECONDS	5
+/* same for the gamma ramp: a Wayland output can vanish (monitor switched to
+ * another input) and come back; keep pushing the last value until it sticks */
+#define GPM_GAMMA_RETRY_SECONDS	5
 #define GPM_DDC_APPLY_MS	200
 #define GPM_DDC_CONFIRM_TRIES	2
 #define GPM_DDC_SETTLE_MS	250
@@ -108,6 +114,8 @@ struct GpmBrightnessPrivate
 #endif
 	gboolean		 hw_changed;
 	gint			 extension_levels;
+	guint			 retry_id;	/* pending re-apply after the output came back */
+	guint			 retry_percentage;
 	gint			 extension_current;
 #ifdef HAVE_X11
 	Atom			 backlight;
@@ -316,6 +324,7 @@ static gboolean gpm_brightness_start_ddc (GpmBrightness *brightness);
 #endif
 #ifdef HAVE_X11
 static gboolean gpm_brightness_gamma_apply (GpmBrightness *brightness, gdouble level);
+static void gpm_brightness_schedule_retry (GpmBrightness *brightness, guint percentage);
 #endif
 
 #ifdef HAVE_DDCUTIL
@@ -800,6 +809,7 @@ gpm_brightness_ddc_worker (gpointer data)
 	while (!brightness->priv->ddc_stop) {
 		guint target;
 		gboolean ok;
+		gboolean retry = FALSE;
 
 		while (!brightness->priv->ddc_has_work && !brightness->priv->ddc_stop)
 			g_cond_wait (&brightness->priv->ddc_cond,
@@ -821,6 +831,25 @@ gpm_brightness_ddc_worker (gpointer data)
 		if (ok && !brightness->priv->ddc_has_work) {
 			brightness->priv->cache_percentage = target;
 			brightness->priv->cache_trusted = TRUE;
+		} else if (!ok && !brightness->priv->ddc_has_work) {
+			/* The write did not reach the monitor: it is probably
+			 * showing another input, asleep, or the handle went
+			 * stale.  Keep the value pending and retry, so the
+			 * brightness comes back by itself when the display
+			 * returns instead of leaving the slider dead. */
+			brightness->priv->ddc_target = target;
+			brightness->priv->ddc_has_work = TRUE;
+			retry = TRUE;
+		}
+
+		if (retry) {
+			/* Sleep with the lock released, otherwise the UI cannot
+			 * post a new value while we wait for the monitor. */
+			g_debug ("DDC/CI write failed; retrying in %d s",
+				 GPM_DDC_RETRY_SECONDS);
+			g_mutex_unlock (&brightness->priv->ddc_lock);
+			g_usleep (GPM_DDC_RETRY_SECONDS * G_USEC_PER_SEC);
+			g_mutex_lock (&brightness->priv->ddc_lock);
 		}
 	}
 
@@ -1479,6 +1508,36 @@ gpm_brightness_trust_cache (GpmBrightness *brightness)
 	return FALSE;
 }
 
+/* Re-apply the value that failed to reach the hardware.  A Wayland output
+ * disappears when the monitor is switched to another input and comes back
+ * later; without this the user had to move the slider again to get the old
+ * brightness back. */
+static gboolean
+gpm_brightness_retry_cb (gpointer data)
+{
+	GpmBrightness *brightness = GPM_BRIGHTNESS (data);
+
+	brightness->priv->retry_id = 0;
+	g_debug ("re-applying brightness %u%%", brightness->priv->retry_percentage);
+	gpm_brightness_set (brightness, brightness->priv->retry_percentage, NULL);
+
+	return G_SOURCE_REMOVE;
+}
+
+static void
+gpm_brightness_schedule_retry (GpmBrightness *brightness, guint percentage)
+{
+	brightness->priv->retry_percentage = percentage;
+
+	if (brightness->priv->retry_id != 0)
+		return;
+
+	brightness->priv->retry_id =
+		g_timeout_add_seconds (GPM_GAMMA_RETRY_SECONDS,
+				       gpm_brightness_retry_cb,
+				       brightness);
+}
+
 /**
  * gpm_brightness_set:
  * @brightness: This brightness class instance
@@ -1520,6 +1579,11 @@ gpm_brightness_set (GpmBrightness *brightness, guint percentage, gboolean *hw_ch
 		brightness->priv->extension_current = egg_discrete_from_percent (percentage, brightness->priv->extension_levels+1);
 		ret = gpm_brightness_helper_set_value ("set-brightness", brightness->priv->extension_current);
 	}
+
+	/* The ramp could not be pushed (output gone, compositor refused): keep
+	 * trying, the display may come back. */
+	if (!ret && brightness->priv->use_gamma)
+		gpm_brightness_schedule_retry (brightness, percentage);
 
 	/* did the hardware have to be modified? */
 	if (ret && hw_changed != NULL)
@@ -1763,6 +1827,10 @@ gpm_brightness_finalize (GObject *object)
 	g_return_if_fail (object != NULL);
 	g_return_if_fail (GPM_IS_BRIGHTNESS (object));
 	brightness = GPM_BRIGHTNESS (object);
+	if (brightness->priv->retry_id != 0) {
+		g_source_remove (brightness->priv->retry_id);
+		brightness->priv->retry_id = 0;
+	}
 #ifdef HAVE_DDCUTIL
 	if (brightness->priv->ddc_thread != NULL) {
 		g_mutex_lock (&brightness->priv->ddc_lock);
