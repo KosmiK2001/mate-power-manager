@@ -1,8 +1,8 @@
 NULL =
 
 if HAVE_WAYLAND
-WAYLAND_CPPFLAGS = $(GTK_LAYER_SHELL_CFLAGS) $(WAYLAND_CLIENT_CFLAGS) -I$(top_srcdir)/src
-WAYLAND_LIBS = $(GTK_LAYER_SHELL_LIBS) $(WAYLAND_CLIENT_LIBS)
+WAYLAND_CPPFLAGS = $(GTK_LAYER_SHELL_CFLAGS)
+WAYLAND_LIBS = $(GTK_LAYER_SHELL_LIBS)
 endif
 
 AM_CPPFLAGS =							\
@@ -38,10 +38,7 @@ pkglib_LTLIBRARIES = libmate-brightness-applet.la
 libmate_brightness_applet_la_SOURCES =				\
 	brightness-applet.c					\
 	gpm-common.c						\
-	gpm-common.h						\
-	$(top_srcdir)/src/gpm-gamma-wayland.c		\
-	$(top_srcdir)/src/gpm-gamma-wayland.h		\
-	wlr-gamma-control-unstable-v1-protocol.c
+	gpm-common.h
 libmate_brightness_applet_la_CFLAGS = $(AM_CFLAGS)
 libmate_brightness_applet_la_LDFLAGS = -module -avoid-version
 libmate_brightness_applet_la_LIBADD =				\
@@ -57,10 +54,7 @@ libexec_PROGRAMS = mate-brightness-applet
 mate_brightness_applet_SOURCES =				\
 	brightness-applet.c					\
 	gpm-common.c						\
-	gpm-common.h						\
-	$(top_srcdir)/src/gpm-gamma-wayland.c		\
-	$(top_srcdir)/src/gpm-gamma-wayland.h		\
-	wlr-gamma-control-unstable-v1-protocol.c
+	gpm-common.h
 mate_brightness_applet_CFLAGS = $(AM_CFLAGS)
 mate_brightness_applet_LDADD =					\
 	$(DBUS_LIBS)						\
@@ -103,15 +97,3 @@ DISTCLEANFILES =						\
 	$(applet_DATA) $(applet_DATA).in $(service_DATA)
 
 -include $(top_srcdir)/git.mk
-
-if HAVE_WAYLAND
-WLR_GAMMA_XML = $(top_srcdir)/src/wlr-gamma-control-unstable-v1.xml
-BUILT_SOURCES = wlr-gamma-control-unstable-v1-client.h \
-	wlr-gamma-control-unstable-v1-protocol.c
-
-wlr-gamma-control-unstable-v1-client.h: $(WLR_GAMMA_XML)
-	$(AM_V_GEN)$(WAYLAND_SCANNER) client-header < $< > $@
-
-wlr-gamma-control-unstable-v1-protocol.c: $(WLR_GAMMA_XML)
-	$(AM_V_GEN)$(WAYLAND_SCANNER) private-code < $< > $@
-endif
