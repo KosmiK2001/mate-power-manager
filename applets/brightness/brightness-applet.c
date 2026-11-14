@@ -1318,6 +1318,10 @@ gpm_applet_destroy_cb (GtkWidget *widget)
 		g_source_remove (applet->slider_delay_id);
 		applet->slider_delay_id = 0;
 	}
+	if (applet->poll_id != 0) {
+		g_source_remove (applet->poll_id);
+		applet->poll_id = 0;
+	}
 
 	g_bus_unwatch_name (applet->bus_watch_id);
 	if (applet->icon != NULL)
@@ -1447,6 +1451,8 @@ gpm_brightness_applet_poll_done_cb (GObject *source_object, GAsyncResult *res,
 		gpm_applet_update_tooltip (applet);
 		gpm_applet_draw_cb (applet);
 	}
+
+	g_object_unref (applet);
 }
 
 static gboolean
@@ -1488,7 +1494,7 @@ gpm_brightness_applet_poll_cb (GpmBrightnessApplet *applet)
 				20000,
 				NULL,
 				gpm_brightness_applet_poll_done_cb,
-				applet);
+				g_object_ref (applet));
 	g_object_unref (bus);
 
 	return TRUE;

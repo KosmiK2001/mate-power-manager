@@ -49,7 +49,7 @@
 #include <glib.h>
 #include <gdk/gdkwayland.h>
 
-#include "wlr-gamma-control-client.h"
+#include "wlr-gamma-control-unstable-v1-client.h"
 
 #include "gpm-gamma-wayland.h"
 
