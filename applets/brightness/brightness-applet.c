@@ -822,8 +822,11 @@ gpm_applet_show_preferences (GtkWidget *widget, GpmBrightnessApplet *applet)
 		_("Darkens the picture, not the backlight. Always available"), current);
 
 	gtk_widget_show_all (dialog);
-	gtk_dialog_run (GTK_DIALOG (dialog));
-	gtk_widget_destroy (dialog);
+	/* NOT gtk_dialog_run(): it spins its own recursive main loop with a modal
+	 * grab, which freezes the panel menu and breaks window dragging for the
+	 * whole session while the dialog is open. */
+	g_signal_connect_swapped (dialog, "response",
+				  G_CALLBACK (gtk_widget_destroy), dialog);
 
 	g_free (current);
 	g_object_unref (settings);
