@@ -528,6 +528,20 @@ gpm_applet_slide_cb (GtkWidget *w, GpmBrightnessApplet *applet)
  * callback handling keyboard
  * mainly escape to unpop and arrows to change brightness
  **/
+/* Drop the button's pressed/hover look.  EVERY way of closing the popup has to
+ * call this: the panel keeps the highlight otherwise, because closing from a
+ * key press or a click on the barrier never generates a leave event for the
+ * applet button. */
+static void
+gpm_applet_reset_button (GpmBrightnessApplet *applet)
+{
+	gtk_widget_unset_state_flags (GTK_WIDGET (applet),
+				      GTK_STATE_FLAG_PRELIGHT |
+				      GTK_STATE_FLAG_ACTIVE |
+				      GTK_STATE_FLAG_SELECTED);
+	gtk_widget_queue_draw (GTK_WIDGET (applet));
+}
+
 static gboolean
 gpm_applet_key_press_cb (GtkWidget *popup, GdkEventKey *event, GpmBrightnessApplet *applet)
 {
@@ -544,6 +558,7 @@ gpm_applet_key_press_cb (GtkWidget *popup, GdkEventKey *event, GpmBrightnessAppl
 			gtk_widget_hide (applet->popup);
 			applet->popped = FALSE;
 			gpm_applet_update_tooltip (applet);
+			gpm_applet_reset_button (applet);
 			return TRUE;
 		} else {
 			return FALSE;
@@ -622,6 +637,7 @@ on_popup_button_press (GtkWidget      *widget,
 		gtk_widget_hide (applet->popup);
 		applet->popped = FALSE;
 		gpm_applet_update_tooltip (applet);
+		gpm_applet_reset_button (applet);
 		return TRUE;
 	}
 
@@ -767,8 +783,7 @@ gpm_applet_show_preferences (GtkWidget *widget, GpmBrightnessApplet *applet)
 	if (applet->barrier != NULL)
 		gtk_widget_hide (applet->barrier);
 	applet->popped = FALSE;
-	gtk_widget_unset_state_flags (GTK_WIDGET (applet), GTK_STATE_FLAG_PRELIGHT);
-	gtk_widget_queue_draw (GTK_WIDGET (applet));
+	gpm_applet_reset_button (applet);
 
 	settings = g_settings_new ("org.mate.power-manager");
 	current = g_settings_get_string (settings, "brightness-backend");
@@ -850,8 +865,7 @@ gpm_applet_barrier_press_cb (GtkWidget *widget, GdkEventButton *event, GpmBright
 	gtk_widget_hide (widget);
 	applet->popped = FALSE;
 	gpm_applet_update_tooltip (applet);
-	gtk_widget_unset_state_flags (GTK_WIDGET (applet), GTK_STATE_FLAG_PRELIGHT);
-	gtk_widget_queue_draw (GTK_WIDGET (applet));
+	gpm_applet_reset_button (applet);
 	return TRUE;
 }
 

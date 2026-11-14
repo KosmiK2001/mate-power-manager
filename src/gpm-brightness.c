@@ -619,35 +619,64 @@ gpm_brightness_ddc_reopen (GpmBrightness *brightness)
 	return gpm_brightness_ddc_open (brightness);
 }
 
+/* libddcutil is slow on first use: ddca_init() reads its configuration and the
+ * display scan probes every i2c bus (measured: ~7 s on this machine).  Doing
+ * that when the user switches from gamma to ddc made the first slider move feel
+ * dead, so the expensive part is warmed up in the background at daemon start
+ * and the scan result is kept for later opens. */
+static gboolean ddc_lib_inited = FALSE;
+static DDCA_Display_Info_List *ddc_info_cache = NULL;
+
+static void
+gpm_brightness_ddc_lib_init (void)
+{
+	DDCA_Status irc;
+
+	if (ddc_lib_inited)
+		return;
+
+	irc = ddca_init (NULL, DDCA_SYSLOG_ERROR, DDCA_INIT_OPTIONS_NONE);
+	g_debug ("libddcutil init: rc=%d (%s)", irc, ddca_rc_name (irc));
+	ddc_lib_inited = TRUE;
+}
+
+static gpointer
+gpm_brightness_ddc_warmup (gpointer data)
+{
+	gpm_brightness_ddc_lib_init ();
+
+	if (ddc_info_cache == NULL)
+		ddca_get_display_info_list2 (TRUE, &ddc_info_cache);
+
+	g_debug ("DDC/CI warm-up done (%u display(s))",
+		 ddc_info_cache != NULL ? ddc_info_cache->ct : 0);
+	return NULL;
+}
+
 static gboolean
 gpm_brightness_ddc_open (GpmBrightness *brightness)
 {
-	static gboolean ddc_inited = FALSE;
 	DDCA_Display_Info_List *list;
 	gboolean opened = FALSE;
 
-	/* The C API initializes itself with defaults when it is used implicitly,
-	 * and those defaults ignore the ddcutil configuration file.  On this
-	 * machine the panel only accepts writes when the i2c source address is
-	 * 0x51, which lives in that file, so writes reported DDCRC_OK and never
-	 * reached the backlight.  Initialize explicitly so the file is read. */
-	if (!ddc_inited) {
-		DDCA_Status irc = ddca_init (NULL, DDCA_SYSLOG_ERROR, DDCA_INIT_OPTIONS_NONE);
-		g_debug ("libddcutil init: rc=%d (%s)", irc, ddca_rc_name (irc));
-		ddc_inited = TRUE;
-	}
+	/* Explicit init: the implicit one ignores the ddcutil configuration file,
+	 * and this panel only accepts writes with the i2c source address set
+	 * there (0x51) - without it writes reported OK and changed nothing. */
+	gpm_brightness_ddc_lib_init ();
 
 	/* The bus answers through the nVidia driver intermittently: a single failed
 	 * open is not evidence that the monitor has no DDC/CI. */
 	for (gint attempt = 0; attempt < GPM_DDC_OPEN_RETRIES && !opened; attempt++) {
-		list = NULL;
-		if (ddca_get_display_info_list2 (TRUE, &list) != DDCRC_OK || list == NULL) {
+		list = ddc_info_cache;
+		if (list == NULL &&
+		    (ddca_get_display_info_list2 (TRUE, &list) != DDCRC_OK || list == NULL)) {
 			if (gpm_brightness_ddc_open_busno (brightness))
 				opened = TRUE;
 			if (!opened)
 				g_usleep (G_USEC_PER_SEC / 3);
 			continue;
 		}
+		ddc_info_cache = list;
 
 		if (list->ct == 0) {
 			/* Detection succeeded but found nothing, while the bus itself
@@ -655,7 +684,6 @@ gpm_brightness_ddc_open (GpmBrightness *brightness)
 			 * there is no monitor: address the known bus directly. */
 			if (gpm_brightness_ddc_open_busno (brightness))
 				opened = TRUE;
-			ddca_free_display_info_list (list);
 			if (!opened)
 				g_usleep (G_USEC_PER_SEC / 3);
 			continue;
@@ -671,8 +699,6 @@ gpm_brightness_ddc_open (GpmBrightness *brightness)
 			if (rc == DDCRC_OK && brightness->priv->ddc_handle != NULL)
 				opened = TRUE;
 		}
-
-		ddca_free_display_info_list (list);
 
 		if (!opened)
 			g_usleep (G_USEC_PER_SEC / 3);
@@ -1981,6 +2007,15 @@ gpm_brightness_init (GpmBrightness *brightness)
 	brightness->priv->hw_changed = FALSE;
 	brightness->priv->extension_levels = -1;
 
+#ifdef HAVE_DDCUTIL
+	/* Warm libddcutil up in the background so switching to the ddc backend
+	 * is immediate instead of waiting for init + bus scan. */
+	{
+		GThread *warm = g_thread_new ("ddc-warmup",
+					      gpm_brightness_ddc_warmup, NULL);
+		g_thread_unref (warm);
+	}
+#endif
 	brightness->priv->settings = g_settings_new ("org.mate.power-manager");
 	brightness->priv->backend =
 		g_settings_get_string (brightness->priv->settings,
