@@ -3,6 +3,12 @@ AUTOMAKE_OPTIONS = 1.7
 
 NULL =
 
+if HAVE_WAYLAND
+WAYLAND_LIBS_SHARED = $(WAYLAND_CLIENT_LIBS)
+else
+WAYLAND_LIBS_SHARED =
+endif
+
 EXTRA_DIST =						\
 	org.mate.PowerManager.xml			\
 	org.mate.PowerManager.Backlight.xml		\
@@ -141,6 +147,7 @@ mate_power_statistics_LDADD =				\
 	$(UPOWER_LIBS)					\
 	$(CAIRO_LIBS)					\
 	$(DBUS_LIBS)					\
+	$(WAYLAND_LIBS_SHARED)				\
 	-lm
 
 mate_power_statistics_CFLAGS =				\
@@ -170,6 +177,7 @@ mate_power_preferences_LDADD =				\
 	$(DBUS_LIBS)					\
 	$(GPM_EXTRA_LIBS)				\
 	$(UPOWER_LIBS)					\
+	$(WAYLAND_LIBS_SHARED)				\
 	-lm
 
 mate_power_preferences_CFLAGS =				\
